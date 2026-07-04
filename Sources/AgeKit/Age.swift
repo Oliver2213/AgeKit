@@ -37,9 +37,9 @@ public enum Age {
     /// instead pass Recipient implementations to `encrypt` and implementations
     /// conforming to `Identity`.
     public struct Stanza {
-        var type: String
-        var args: [String]
-        var body: Data
+        public var type: String
+        public var args: [String]
+        public var body: Data
 
         init() {
             self.type = ""
@@ -47,7 +47,9 @@ public enum Age {
             self.body = Data()
         }
 
-        init(type: String, args: [String], body: Data?) {
+        // Public so external `Recipient`/`Identity` conformers (e.g. plugin-style
+        // recipients) can construct and inspect stanzas, as the protocol docs promise.
+        public init(type: String, args: [String], body: Data?) {
             self.type = type
             self.args = args
             self.body = body ?? Data()
