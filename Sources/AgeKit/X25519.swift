@@ -120,16 +120,16 @@ extension Age {
                 guard block.args.count == 1 else {
                     throw Error.invalidX25519RecipientBlock
                 }
-                let rawPubKey = try Base64.decode(string: block.args[0], options: .omitPaddingCharacter)
-                let publicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: Data(rawPubKey))
-                guard publicKey.rawRepresentation.count == Curve25519.pointSize else {
+                let rawShare = try Base64.decode(string: block.args[0], options: .omitPaddingCharacter)
+                let ephemeralShare = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: Data(rawShare))
+                guard ephemeralShare.rawRepresentation.count == Curve25519.pointSize else {
                     throw Error.invalidX25519RecipientBlock
                 }
 
-                let sharedSecret = try secretKey.sharedSecretFromKeyAgreement(with: publicKey)
+                let sharedSecret = try secretKey.sharedSecretFromKeyAgreement(with: ephemeralShare)
 
-                // FIXME: publicKey and secretKey.publicKey are the same?
-                let salt = Data(publicKey.rawRepresentation + secretKey.publicKey.rawRepresentation)
+                // salt = ephemeral share || recipient public key (our own).
+                let salt = Data(ephemeralShare.rawRepresentation + secretKey.publicKey.rawRepresentation)
                 let wrappingKey = sharedSecret.hkdfDerivedSymmetricKey(
                     using: SHA256.self,
                     salt: salt,
