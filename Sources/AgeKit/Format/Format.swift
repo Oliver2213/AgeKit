@@ -83,7 +83,19 @@ extension Format {
             }
             stanza.append("\n")
             let b64 = Base64.encodeString(bytes: body, options: .omitPaddingCharacter)
-            stanza.append(b64)
+            // The age format wraps the base64 body at `columnsPerLine` columns.
+            // This must be byte-exact: the header MAC is computed over this
+            // canonical encoding, so an unwrapped long line (e.g. a grease stanza
+            // with a body over one line) would make interop headers fail the MAC.
+            var column = 0
+            for character in b64 {
+                if column == Format.columnsPerLine {
+                    stanza.append("\n")
+                    column = 0
+                }
+                stanza.append(character)
+                column += 1
+            }
             // The format is a little finicky and requires some short lines.
             // When the input is divisible by bytesPerLine the encoder won't have
             // added the final newline the format expects.
@@ -151,20 +163,19 @@ extension Format {
                     throw StanzaError.lineError
                 }
 
-                var lineStr = String(bytes: line, encoding: .utf8)!
-                lineStr = lineStr.trimmingCharacters(in: ["\n"])
-                let b: Data
-                do {
-                    b = try decodeString(lineStr)
-                    if b.count > bytesPerLine {
-                        throw StanzaError.malformedBodyLineSize
-                    }
-                    stanza.body.append(b)
-                    if b.count < bytesPerLine {
-                        return stanza
-                    }
-                } catch {
-                    // TODO: The Go implementation checks the value for the footerPrefix and stanzaPrefix
+                let lineStr = String(bytes: line, encoding: .utf8)!
+                    .trimmingCharacters(in: ["\n"])
+                // A stanza body is base64 wrapped at 64 columns and ends at the
+                // first line shorter than a full line (which may be empty). Reject
+                // invalid or over-long body lines rather than silently skipping
+                // them — the header MAC is computed over this exact encoding.
+                let b = try decodeString(lineStr)
+                if b.count > bytesPerLine {
+                    throw StanzaError.malformedBodyLineSize
+                }
+                stanza.body.append(b)
+                if b.count < bytesPerLine {
+                    return stanza
                 }
             }
         }
