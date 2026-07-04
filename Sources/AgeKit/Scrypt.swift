@@ -132,15 +132,22 @@ extension Age {
                 }
 
                 salt = Data(scryptLabel.bytes + salt.bytes)
-                let k = try scrypt(
-                    password: Array(password),
-                    salt: salt.bytes,
-                    length: ChaChaPoly.keySize,
-                    N: 1<<logN,
-                    r: 8,
-                    p: 1)
-                let fileKey = try aeadDecrypt(key: k, size: fileKeySize, ciphertext: block.body)
-                return SymmetricKey(data: fileKey)
+                do {
+                    let k = try scrypt(
+                        password: Array(password),
+                        salt: salt.bytes,
+                        length: ChaChaPoly.keySize,
+                        N: 1<<logN,
+                        r: 8,
+                        p: 1)
+                    let fileKey = try aeadDecrypt(key: k, size: fileKeySize, ciphertext: block.body)
+                    return SymmetricKey(data: fileKey)
+                } catch {
+                    // Wrong passphrase (or a tampered body) — like X25519Identity,
+                    // report it as an incorrect identity rather than leaking the
+                    // underlying AEAD error.
+                    throw DecryptError.incorrectIdentity
+                }
             }
         }
     }
