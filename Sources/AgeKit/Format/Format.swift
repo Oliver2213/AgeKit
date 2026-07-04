@@ -1,7 +1,6 @@
 import CryptoKit
 import ExtrasBase64
 import Foundation
-import NIOCore
 
 public enum Format {
     static let intro = "age-encryption.org/v1\n"
@@ -133,9 +132,9 @@ extension Format {
     }
 
     struct StanzaReader {
-        var buf: ByteBuffer
+        var buf: ByteReader
 
-        init(_ buf: ByteBuffer) {
+        init(_ buf: ByteReader) {
             self.buf = buf
         }
 
@@ -193,7 +192,7 @@ extension Format {
         var header = Header()
         // Consume the entire input
         // FIXME: We shouldn't do this and should read chunks at a time
-        var buf = ByteBuffer(input)
+        var buf = ByteReader(input)
 
         guard let line = buf.readString(until: "\n") else {
             throw ParseError.introRead

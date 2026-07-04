@@ -1,5 +1,4 @@
 import Foundation
-import NIOCore
 
 public enum Armor {
     public static let header = "-----BEGIN AGE ENCRYPTED FILE-----"
@@ -51,14 +50,14 @@ extension Armor {
 
 extension Armor {
     public struct Reader {
-        private var src: ByteBuffer
+        private var src: ByteReader
         private var encoded = ""
         private var started = false
         private let maxWhitespace = 1024
 
         public init(src: InputStream) {
-            // FIXME: Consuming the entire input is probably bad, but InputStream is too hard to work with.
-            self.src = ByteBuffer(src)
+            // Consumes the entire input; age files are read fully into memory to parse.
+            self.src = ByteReader(src)
         }
 
         public mutating func read(_ buffer: inout [UInt8]) throws -> Int {

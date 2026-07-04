@@ -1,5 +1,4 @@
 import Foundation
-import NIOCore
 
 extension Age {
     enum ParseError: Error {
@@ -12,7 +11,7 @@ extension Age {
     /// Empty lines and lines starting with "#" are ignored.
     public static func parseIdentities(input: InputStream) throws -> [Identity] {
         var ids: [Identity] = []
-        var buf = ByteBuffer(input)
+        var buf = ByteReader(input)
 
         var n = 0
         while buf.readableBytes > 0 {

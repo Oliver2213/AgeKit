@@ -17,7 +17,6 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/greymass/swift-scrypt.git", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
         .package(url: "https://github.com/swift-extras/swift-extras-base64.git", from: "0.7.0"),
         // TODO: Change this to a version once they've tagged a release which includes 155b8acdb2a9be1db8a195b2f6a9e6c18d9b754e
         .package(url: "https://github.com/apple/swift-asn1.git", branch: "main"),
@@ -28,7 +27,6 @@ let package = Package(
             dependencies: [
                 "Bech32",
                 .product(name: "Scrypt", package: "swift-scrypt"),
-                .product(name: "NIO", package: "swift-nio"),
                 .product(name: "ExtrasBase64", package: "swift-extras-base64")
             ]),
         .target(name: "Bech32"),
