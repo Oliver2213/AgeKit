@@ -13,8 +13,8 @@ The reference Go implementation is available at [filippo.io/age](https://filippo
 These features of age have been implemented:
 
 - ✅ X25519 public/private keys
-- ⚠️ Scrypt passphrases: this is implemented but there are issues with the format that have
-  compatibility issues with the Go version of the tool
+- ✅ Scrypt passphrases (verified interoperable with the `rage`/`age` CLI in both
+  directions: files we encrypt decrypt with the CLI, and vice versa)
 - ✅ Armored (PEM) encoding and decoding
 - ❌ SSH keys
   - ❌ GitHub users

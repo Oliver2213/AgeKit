@@ -77,7 +77,8 @@ extension Age {
         private let password: Data
         private var maxWorkFactor: Int
 
-        init?(_ password: String) {
+        /// Create a password-based identity. Returns nil for an empty password.
+        public init?(_ password: String) {
             if password.isEmpty {
                 return nil
             }
