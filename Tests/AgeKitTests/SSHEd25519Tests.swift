@@ -144,6 +144,48 @@ final class SSHEd25519Tests: XCTestCase {
         XCTAssertThrowsError(try decryptString(other, ageFile))
     }
 
+    // MARK: Seed round-trip + OpenSSH serialization
+
+    func testSeedRoundTrip() throws {
+        let id = try Age.SSHEd25519Identity(opensshPEM: Self.plainPrivatePEM)
+        let rebuilt = try Age.SSHEd25519Identity(seed: id.seed, comment: id.comment)
+        XCTAssertEqual(rebuilt.fingerprint, id.fingerprint)
+        XCTAssertEqual(rebuilt.authorizedKey, Self.plainAuthorizedKey)
+        // The rebuilt identity decrypts the same rage vector.
+        XCTAssertEqual(try decryptString(rebuilt, Data(b64(Self.rageVectorB64))), Self.plaintext)
+    }
+
+    func testSerializedKeyIsAcceptedBySSHKeygen() throws {
+        let keygen = "/usr/bin/ssh-keygen"
+        guard FileManager.default.isExecutableFile(atPath: keygen) else {
+            throw XCTSkip("ssh-keygen not available")
+        }
+        let id = try Age.SSHEd25519Identity(opensshPEM: Self.plainPrivatePEM)
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agekit-ser-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let keyPath = tmp.appendingPathComponent("id_ed25519")
+        try (id.opensshPEM() + "\n").write(to: keyPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: keyPath.path)
+
+        // ssh-keygen -y derives the public key from our serialized private key.
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: keygen)
+        proc.arguments = ["-y", "-f", keyPath.path]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = Pipe()
+        try proc.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        XCTAssertEqual(proc.terminationStatus, 0, "ssh-keygen rejected our serialized key")
+        // ssh-keygen prints "ssh-ed25519 <base64>" (no comment) — compare the key fields.
+        let printed = String(decoding: data, as: UTF8.self).split(separator: " ").prefix(2).joined(separator: " ")
+        let expected = Self.plainAuthorizedKey.split(separator: " ").prefix(2).joined(separator: " ")
+        XCTAssertEqual(printed, expected)
+    }
+
     // MARK: Passphrase-protected keys (bcrypt-pbkdf + AES-256-CTR)
 
     func testDecryptsWithPassphraseProtectedKey() throws {

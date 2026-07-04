@@ -35,6 +35,13 @@ private func sshFingerprint(_ blob: [UInt8]) -> String {
 
 private let sshLabelBytes = Array(sshEd25519Label.utf8)
 
+/// Render an `authorized_keys` line: `ssh-ed25519 <base64 of wire blob> [comment]`.
+/// The base64 uses the standard alphabet with padding, as ssh tools emit.
+private func authorizedKeyLine(blob: [UInt8], comment: String) -> String {
+    let b64 = Data(blob).base64EncodedString()
+    return comment.isEmpty ? "ssh-ed25519 \(b64)" : "ssh-ed25519 \(b64) \(comment)"
+}
+
 // MARK: - Recipient
 
 extension Age {
@@ -54,6 +61,9 @@ extension Age {
 
         /// The age recipient hash, base64 (no padding).
         public var fingerprint: String { sshFingerprint(sshKeyBlob) }
+
+        /// The `authorized_keys` line for this key (`ssh-ed25519 <base64> [comment]`).
+        public var authorizedKey: String { authorizedKeyLine(blob: sshKeyBlob, comment: comment) }
 
         /// Parse from a single `authorized_keys` line
         /// (`ssh-ed25519 AAAA… [comment]`).
@@ -110,6 +120,9 @@ extension Age {
     /// An `ssh-ed25519` identity: decrypt age files wrapped to an existing SSH
     /// Ed25519 private key. Wire-compatible with age's `agessh` package.
     public struct SSHEd25519Identity: Identity {
+        /// The 32-byte Ed25519 seed — the portable secret; enough to rebuild the
+        /// whole key (see `init(seed:comment:)`).
+        public let seed: [UInt8]
         /// The Curve25519 secret scalar derived from the Ed25519 seed.
         private let curveSecret: [UInt8]
         /// Our Curve25519 (Montgomery) public key.
@@ -117,6 +130,9 @@ extension Age {
         private let sshKeyBlob: [UInt8]
 
         public let comment: String
+
+        /// The `authorized_keys` line for this key's public half.
+        public var authorizedKey: String { authorizedKeyLine(blob: sshKeyBlob, comment: comment) }
 
         /// Parse from an OpenSSH private key. Pass `passphrase` for encrypted keys.
         ///
@@ -126,7 +142,22 @@ extension Age {
             try self.init(privateKey: parseOpenSSHPrivateKey(pem, passphrase: passphrase))
         }
 
+        /// Rebuild an identity from a stored 32-byte Ed25519 seed (the public key
+        /// and all derived material follow deterministically). `comment` is
+        /// cosmetic — it isn't part of the recipient hash.
+        public init(seed: [UInt8], comment: String = "") throws {
+            guard seed.count == 32 else { throw SSHKeyError.malformedPrivateKey }
+            let signing = try Curve25519.Signing.PrivateKey(rawRepresentation: Data(seed))
+            let pub = Array(signing.publicKey.rawRepresentation)
+            let blob = sshString("ssh-ed25519") + sshString(pub)
+            try self.init(privateKey: SSHEd25519PrivateKey(
+                seed: seed,
+                publicKey: SSHEd25519PublicKey(raw: pub, blob: blob, comment: comment),
+                comment: comment))
+        }
+
         init(privateKey: SSHEd25519PrivateKey) throws {
+            self.seed = privateKey.seed
             // Curve25519 secret = SHA-512(seed)[:32]; public = X25519(secret, base).
             let hashed = SHA512.hash(data: Data(privateKey.seed))
             self.curveSecret = Array(hashed.prefix(32))
