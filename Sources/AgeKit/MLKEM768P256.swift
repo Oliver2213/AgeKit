@@ -109,3 +109,80 @@ extension Age {
         }
     }
 }
+
+private let mlkemCiphertextSize = 1088
+
+extension Age {
+    /// The private side of a tagged hybrid post-quantum key. Because the ML-KEM and
+    /// P-256 private keys may live anywhere — including the Secure Enclave — this
+    /// identity decapsulates through two caller-supplied operations rather than
+    /// holding raw keys itself. A convenience initializer wraps in-memory keys.
+    @available(macOS 26, iOS 26, tvOS 26, watchOS 26, *)
+    public struct MLKEM768P256Identity: Identity {
+        /// The recipient's P-256 point (uncompressed, 65 bytes) — public, used for
+        /// the stanza tag check and the shared-secret combiner.
+        private let p256Point: Data
+        /// ML-KEM-768 decapsulation of a ciphertext to its shared secret.
+        private let mlkemDecapsulate: (Data) throws -> SymmetricKey
+        /// P-256 ECDH between the private key and an ephemeral public key.
+        private let p256KeyAgreement: (P256.KeyAgreement.PublicKey) throws -> SharedSecret
+
+        /// Build from provided decapsulation operations — e.g. backed by Secure
+        /// Enclave keys, whose use triggers the key's presence policy.
+        public init(
+            p256PublicKey: P256.KeyAgreement.PublicKey,
+            mlkemDecapsulate: @escaping (Data) throws -> SymmetricKey,
+            p256KeyAgreement: @escaping (P256.KeyAgreement.PublicKey) throws -> SharedSecret
+        ) {
+            self.p256Point = p256PublicKey.x963Representation
+            self.mlkemDecapsulate = mlkemDecapsulate
+            self.p256KeyAgreement = p256KeyAgreement
+        }
+
+        /// Build from in-memory keys (testing, or software-held keys).
+        public init(mlkemKey: MLKEM768.PrivateKey, p256Key: P256.KeyAgreement.PrivateKey) {
+            self.init(
+                p256PublicKey: p256Key.publicKey,
+                mlkemDecapsulate: { try mlkemKey.decapsulate($0) },
+                p256KeyAgreement: { try p256Key.sharedSecretFromKeyAgreement(with: $0) })
+        }
+
+        public func unwrap(stanzas: [Stanza]) throws -> SymmetricKey {
+            for stanza in stanzas {
+                guard stanza.type == mlkem768p256Stanza, stanza.args.count == 2 else { continue }
+                guard let tag = try? Data(Base64.decode(string: stanza.args[0], options: .omitPaddingCharacter)), tag.count == 4,
+                      let enc = try? Data(Base64.decode(string: stanza.args[1], options: .omitPaddingCharacter)),
+                      enc.count == mlkemCiphertextSize + p256UncompressedPointSize,
+                      stanza.body.count == fileKeySize + 16 else { continue }
+
+                // Public tag check: skip stanzas not addressed to this key before
+                // touching a (possibly enclave-bound, prompting) private key.
+                let pointHash = Data(SHA256.hash(data: p256Point).prefix(4))
+                let prk = HKDF<SHA256>.extract(inputKeyMaterial: SymmetricKey(data: enc + pointHash), salt: mlkem768p256Label)
+                guard Data(prk).prefix(4) == tag else { continue }
+
+                let ctPQ = Data(enc.prefix(mlkemCiphertextSize))
+                let ctT = Data(enc.suffix(p256UncompressedPointSize))
+                do {
+                    let ssPQ = try mlkemDecapsulate(ctPQ).withUnsafeBytes { Data($0) }
+                    let ephemeral = try P256.KeyAgreement.PublicKey(x963Representation: ctT)
+                    let ssT = try p256KeyAgreement(ephemeral).withUnsafeBytes { Data($0) }
+
+                    var hasher = SHA3_256()
+                    hasher.update(data: ssPQ)
+                    hasher.update(data: ssT)
+                    hasher.update(data: ctT)
+                    hasher.update(data: p256Point)
+                    hasher.update(data: mlkem768p256KEMLabel)
+                    let sharedSecret = Data(hasher.finalize())
+
+                    let context = HPKE.context(kemID: mlkem768p256KEMID, sharedSecret: sharedSecret, info: mlkem768p256Label)
+                    return SymmetricKey(data: try HPKE.open(context, ciphertext: stanza.body))
+                } catch {
+                    continue
+                }
+            }
+            throw DecryptError.incorrectIdentity
+        }
+    }
+}

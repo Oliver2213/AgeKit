@@ -1,5 +1,6 @@
 import XCTest
 import CryptoKit
+import Bech32
 @testable import AgeKit
 
 /// Tests for the `mlkem768p256tag` tagged post-quantum recipient (`age1tagpq…`).
@@ -49,7 +50,50 @@ final class MLKEM768P256Tests: XCTestCase {
         XCTAssertEqual(str(decrypt.stdout), Self.plaintext)
     }
 
+    /// Round-trip with in-memory keys: proves our unwrap matches our wrap. Combined
+    /// with the age-plugin-se interop test (which pins the wrap), this pins unwrap.
+    func testSoftwareRoundTrip() throws {
+        let mlkem = try MLKEM768.PrivateKey()
+        let p256 = P256.KeyAgreement.PrivateKey()
+        let recipientBytes = mlkem.publicKey.rawRepresentation + p256.publicKey.x963Representation
+        let recipient = try Age.MLKEM768P256Recipient(Bech32.encode(to: "age1tagpq", data: recipientBytes))
+        let identity = Age.MLKEM768P256Identity(mlkemKey: mlkem, p256Key: p256)
+
+        let ageFile = try encrypt(recipient, Self.plaintext)
+        XCTAssertEqual(try decryptString(identity, ageFile), Self.plaintext)
+    }
+
+    func testWrongKeyDoesNotDecrypt() throws {
+        let mlkem = try MLKEM768.PrivateKey()
+        let p256 = P256.KeyAgreement.PrivateKey()
+        let recipient = try Age.MLKEM768P256Recipient(
+            Bech32.encode(to: "age1tagpq", data: mlkem.publicKey.rawRepresentation + p256.publicKey.x963Representation))
+        let ageFile = try encrypt(recipient, Self.plaintext)
+
+        let stranger = Age.MLKEM768P256Identity(mlkemKey: try MLKEM768.PrivateKey(), p256Key: P256.KeyAgreement.PrivateKey())
+        XCTAssertThrowsError(try decryptString(stranger, ageFile))
+    }
+
     // MARK: Helpers
+
+    private func decryptString(_ identity: any Identity, _ ageFile: Data) throws -> String {
+        let input = InputStream(data: ageFile)
+        input.open()
+        defer { input.close() }
+        var r = try Age.decrypt(src: input, identities: identity)
+        var out = Data()
+        var chunk = Data(repeating: 0, count: 4096)
+        while true {
+            let n: Int
+            do { n = try r.read(&chunk) } catch {
+                if "\(error)" == "unexpectedEOF" { break }
+                throw error
+            }
+            if n <= 0 { break }
+            out.append(chunk.prefix(n))
+        }
+        return String(decoding: out, as: UTF8.self)
+    }
 
     private func locate(_ paths: [String], _ name: String) throws -> String {
         for p in paths {
