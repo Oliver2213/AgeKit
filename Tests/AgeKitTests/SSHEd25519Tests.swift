@@ -274,4 +274,37 @@ final class SSHEd25519Tests: XCTestCase {
         }.joined(separator: "\n")
         return "-----BEGIN OPENSSH PRIVATE KEY-----\n\(wrapped)\n-----END OPENSSH PRIVATE KEY-----"
     }
+
+    // MARK: HKDF (RFC 5869 vectors — lock the hand-rolled extract/expand)
+
+    /// Decode a hex string to bytes (for RFC test vectors).
+    private func hex(_ s: String) -> [UInt8] {
+        var bytes = [UInt8]()
+        var idx = s.startIndex
+        while idx < s.endIndex {
+            let next = s.index(idx, offsetBy: 2)
+            bytes.append(UInt8(s[idx..<next], radix: 16)!)
+            idx = next
+        }
+        return bytes
+    }
+
+    /// RFC 5869 Appendix A.1, Test Case 1 (SHA-256): non-empty salt, and L=42
+    /// spans two output blocks — exercises the expand counter across blocks.
+    func testHKDFMatchesRFC5869TestCase1() {
+        let ikm = [UInt8](repeating: 0x0b, count: 22)
+        let salt = hex("000102030405060708090a0b0c")
+        let info = hex("f0f1f2f3f4f5f6f7f8f9")
+        let okm = SSHHKDF.derive(ikm: ikm, salt: salt, info: info, length: 42)
+        XCTAssertEqual(okm, hex("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"))
+    }
+
+    /// RFC 5869 Appendix A.3, Test Case 3 (SHA-256): salt omitted. Our helper
+    /// substitutes HashLen zero bytes (the RFC/Go convention), so an empty salt
+    /// must reproduce this vector rather than trapping in `SymmetricKey(data:)`.
+    func testHKDFEmptySaltMatchesRFC5869TestCase3() {
+        let ikm = [UInt8](repeating: 0x0b, count: 22)
+        let okm = SSHHKDF.derive(ikm: ikm, salt: [], info: [], length: 42)
+        XCTAssertEqual(okm, hex("8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"))
+    }
 }

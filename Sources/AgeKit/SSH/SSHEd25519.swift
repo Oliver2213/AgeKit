@@ -4,24 +4,46 @@ import Foundation
 
 let sshEd25519Label = "age-encryption.org/v1/ssh-ed25519"
 
-/// HKDF-SHA256 (RFC 5869), matching Go's `golang.org/x/crypto/hkdf`. Kept local
-/// so the ssh recipient controls extract/expand exactly (the tweak step uses an
-/// empty IKM with a non-empty salt).
+/// HKDF-SHA256 (RFC 5869), matching Go's `golang.org/x/crypto/hkdf`.
+///
+/// Kept local because CryptoKit's `HKDF` takes the input keying material as a
+/// `SymmetricKey`, and `SymmetricKey(data:)` traps on empty data — so it can't
+/// express age's tweak step, which is an HKDF with an *empty* IKM
+/// (`hkdf.New(sha256, nil, …)`). HMAC has no such restriction, so we drive
+/// extract/expand ourselves over it.
+///
+/// This is the age-specific subset, not a general-purpose HKDF, but it honors the
+/// two limits RFC 5869 defines so misuse fails predictably rather than silently:
+///   - §2.2 (extract): an empty/absent salt becomes `HashLen` zero bytes — the
+///     behavior the RFC and Go's `hkdf` specify, and it also avoids the
+///     `SymmetricKey(data:)` trap. (The empty *IKM* we rely on is fine — it's the
+///     HMAC message, not the key.)
+///   - §2.3 (expand): output length must be `<= 255 * HashLen`; a larger request
+///     is a programmer error and trips a `precondition`. Within that bound the
+///     block counter never exceeds 255, so it always fits the one output byte.
 enum SSHHKDF {
     static func derive(ikm: [UInt8], salt: [UInt8], info: [UInt8], length: Int) -> [UInt8] {
-        let prk = HMAC<SHA256>.authenticationCode(for: ikm, using: SymmetricKey(data: salt))
+        let hashLen = SHA256.byteCount
+        precondition(length >= 0 && length <= 255 * hashLen,
+                     "HKDF-Expand: requested \(length) bytes; RFC 5869 allows 0...\(255 * hashLen) for SHA-256")
+
+        // §2.2 Extract: PRK = HMAC(salt, IKM). No salt -> HashLen zeros (RFC/Go).
+        let saltData = salt.isEmpty ? Data(repeating: 0, count: hashLen) : Data(salt)
+        let prk = HMAC<SHA256>.authenticationCode(for: ikm, using: SymmetricKey(data: saltData))
+
+        // §2.3 Expand: T(i) = HMAC(PRK, T(i-1) ‖ info ‖ i), OKM = first L bytes.
         let prkKey = SymmetricKey(data: Data(prk))
         var okm = [UInt8]()
         var previous = [UInt8]()
-        var counter: UInt8 = 1
+        var counter = 1  // Int; the precondition bounds it to <= 255, so UInt8(counter) is always in range.
         while okm.count < length {
             var input = previous
             input.append(contentsOf: info)
-            input.append(counter)
+            input.append(UInt8(counter))
             let block = HMAC<SHA256>.authenticationCode(for: input, using: prkKey)
             previous = Array(block)
             okm.append(contentsOf: previous)
-            counter &+= 1
+            counter += 1
         }
         return Array(okm.prefix(length))
     }
