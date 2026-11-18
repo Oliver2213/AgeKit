@@ -11,7 +11,9 @@ public struct Nonce {
 
     public mutating func increment() {
         for i in (0...nonce.count-2).reversed() {
-            nonce[i] += 1
+            // Wrapping add: a byte rolling 0xff → 0x00 is the carry into the next
+            // byte, not an error. A checked `+=` traps after 255 chunks (~16 MiB).
+            nonce[i] &+= 1
             if nonce[i] != 0 {
                 break
             }
