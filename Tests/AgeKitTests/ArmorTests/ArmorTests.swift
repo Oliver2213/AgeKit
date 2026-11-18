@@ -25,8 +25,8 @@ final class ArmorTests: XCTestCase {
         let pem = String(data: buf, encoding: .utf8)!
 
         let doc = try PEMDocument(pemString: pem)
-        XCTAssertEqual(doc.type, "AGE ENCRYPTED FILE", "unexpected type")
-        XCTAssertEqual(doc.derBytes, Data(plain), "PEM decoded value doesn't match")
+        XCTAssertEqual(doc.discriminator, "AGE ENCRYPTED FILE", "unexpected type")
+        XCTAssertEqual(doc.derBytes, plain, "PEM decoded value doesn't match")
         XCTAssertEqual(pem, PEMDocument(type: "AGE ENCRYPTED FILE", derBytes: doc.derBytes).pemString, "PEM re-encoded value doesn't match")
 
         let input = InputStream(data: buf)

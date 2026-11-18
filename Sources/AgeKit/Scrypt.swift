@@ -1,7 +1,7 @@
 import CryptoKit
 import ExtrasBase64
 import Foundation
-import Scrypt
+import CryptoExtras
 
 let scryptLabel = "age-encryption.org/v1/scrypt".data(using: .utf8)!
 let scryptSaltSize = 16
@@ -55,13 +55,13 @@ extension Age {
             var salt = scryptLabel
             salt.append(saltBytes, count: saltBytes.count)
 
-            let k = try scrypt(
-                password: password.bytes,
-                salt: salt.bytes,
-                length: ChaChaPoly.keySize,
-                N: 1<<workFactor,
-                r: 8,
-                p: 1)
+            let k = try KDF.Scrypt.deriveKey(
+                from: password,
+                salt: salt,
+                outputByteCount: ChaChaPoly.keySize,
+                rounds: 1<<workFactor,
+                blockSize: 8,
+                parallelism: 1)
             let wrappedKey = try aeadEncrypt(key: k, plaintext: fileKey)
 
             return [Age.Stanza(type: "scrypt", args: args, body: wrappedKey)]
@@ -133,13 +133,13 @@ extension Age {
 
                 salt = Data(scryptLabel.bytes + salt.bytes)
                 do {
-                    let k = try scrypt(
-                        password: Array(password),
-                        salt: salt.bytes,
-                        length: ChaChaPoly.keySize,
-                        N: 1<<logN,
-                        r: 8,
-                        p: 1)
+                    let k = try KDF.Scrypt.deriveKey(
+                        from: password,
+                        salt: salt,
+                        outputByteCount: ChaChaPoly.keySize,
+                        rounds: 1<<logN,
+                        blockSize: 8,
+                        parallelism: 1)
                     let fileKey = try aeadDecrypt(key: k, size: fileKeySize, ciphertext: block.body)
                     return SymmetricKey(data: fileKey)
                 } catch {
